@@ -4,7 +4,7 @@
 #import <KZApplication.h>
 
 #define kAssociateService   @"http://jmscservices.jmfamily.com/"
-#define kGoogleDriveScope   @"GetGoogleToken/Token?scope=https://www.googleapis.com/auth/calendar"
+#define kGoogleDriveScope   @"GetGoogleToken/Token?scope=https://www.googleapis.com/auth/drive"
 #define kOAuthServiceURL    @"https://az.jmfamily.com/authserver/jmassociate/oauth/token"
 #define kOAuthAudience      @"jmassociate"
 #define kOAuthNamespace     @"jmassociate"
@@ -25,9 +25,14 @@
 #define kidoApplication @"tasks"
 #define kidoAccount     @"tellago@kidozen.com"
 #define kidoAccountPass @"pass"
-#define kidoAPIName     @"GDrive-OAuth"
-#define kidoAPIMethod   @"GetAbout"
 #define kidoProvider    @"Kidozen"
+
+#define kidoAPIName             @"GDrive-OAuth"
+#define kidoAPIUploadMethod     @"UploadFile"
+#define kidoAPIListAllMethod    @"GetAllFiles"
+#define kidoAPIGetFileMethod    @"GetFile"
+
+
 
 @implementation MainViewController
 
@@ -151,16 +156,66 @@
 {
     [r.application authenticateUser:kidoAccount withProvider:kidoProvider andPassword:kidoAccountPass completion:^(id c) {
         KZService *gDriveService = [r.application LOBServiceWithName:kidoAPIName];
-        NSDictionary * getAboutOptions = [NSDictionary dictionaryWithObjectsAndKeys:token,@"access_token", nil];
-        NSLog(@"Calling 'GetAbout' method in GDrive");
-        [gDriveService invokeMethod:kidoAPIMethod withData:getAboutOptions completion:^(KZResponse * ar) {
-            NSString * response = [NSString stringWithFormat:@"GDrive response: %@",ar.response];
-            textView.text = response;
-            NSLog(response);
-            dispatch_semaphore_signal(semaphore);
-        }];
+        [self InvokeDriveServiceAPIs:token semaphore:semaphore gDriveService:gDriveService];
     }];
 }
+
+- (void)InvokeDriveServiceAPIs:(NSString *)token semaphore:(dispatch_semaphore_t)semaphore gDriveService:(KZService *)gDriveService
+{
+    NSString * theFileName = @"textfile.txt";
+    NSDictionary * getAllFilesOptions = [NSDictionary dictionaryWithObjectsAndKeys:token,@"access_token",
+                                        [NSNumber numberWithInt:255], @"maxResults",
+                                        nil];
+    
+    NSLog(@"** Calling 'GetAllFiles' method in GDrive");
+    [gDriveService invokeMethod:kidoAPIListAllMethod withData:getAllFilesOptions completion:^(KZResponse * ar) {
+        NSArray *resultArray = [[[ar.response objectForKey:@"data"] objectForKey:@"items"]
+                                filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"(originalFilename == %@)",theFileName]];
+
+        if (resultArray) {
+            getFile(resultArray, token, semaphore, textView, gDriveService);
+        }
+        
+        else {
+            createFile(theFileName, token, semaphore, textView, gDriveService);
+
+        }
+    }];
+}
+
+void getFile(NSArray *resultArray, NSString *token, dispatch_semaphore_t semaphore, UITextView *textView, KZService *gDriveService)
+{
+    //prints the file information
+    NSString * fileId = [[resultArray objectAtIndex:0] objectForKey:@"id"];
+    NSDictionary * getFileOptions = [NSDictionary dictionaryWithObjectsAndKeys:token,@"access_token",
+                                     fileId, @"fileId",
+                                     nil];
+    
+    NSLog(@"** Calling 'GetFile' method in GDrive");
+    [gDriveService invokeMethod:kidoAPIGetFileMethod withData:getFileOptions completion:^(KZResponse * ar) {
+        NSString * response = [NSString stringWithFormat:@"GDrive response: %@",ar.response];
+        textView.text = response;
+        dispatch_semaphore_signal(semaphore);
+    }];
+}
+
+void createFile(NSString *theFileName, NSString *token, dispatch_semaphore_t semaphore, UITextView *textView, KZService *gDriveService)
+{
+    //file does not exists, (run the application again to get the file contents from the API )
+    NSLog(@"File does not exists. Creating it .... ");
+    NSDictionary * uploadFileOptions = [NSDictionary dictionaryWithObjectsAndKeys:token,@"access_token",
+                                        @"abracadabra", @"body",
+                                        theFileName, @"title",
+                                        @"text/plan",@"contentType",
+                                        nil];
+    NSLog(@"** Calling 'UploadFile' method in GDrive");
+    [gDriveService invokeMethod:kidoAPIUploadMethod withData:uploadFileOptions completion:^(KZResponse * ar) {
+        NSString * response = [NSString stringWithFormat:@"GDrive response: %@",ar.response];
+        textView.text = response;
+        dispatch_semaphore_signal(semaphore);
+    }];
+}
+
 
 
 - (void)didReceiveMemoryWarning
